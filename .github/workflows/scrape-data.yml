@@ -1,0 +1,62 @@
+name: Update Council Data
+
+on:
+  schedule:
+    # Run every Monday at 1 AM UTC (8 PM EST Sunday)
+    - cron: '0 1 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd scripts/scraper
+          pip install -e .
+
+      - name: Run scraper pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          cd scripts/scraper
+          python main.py
+
+      - name: Commit and push changes
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Check if there are changes
+          if ! git diff-index --quiet HEAD --; then
+            git add -A
+            git commit -m "chore: update civic data - $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ Scraper pipeline failed. Check logs for details.'
+            })

@@ -1,6 +1,6 @@
 {
-  "name": "my-project",
-  "version": "0.1.0",
+  "name": "ajax-in-plain-sight",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -73,3 +73,4 @@
     "tw-animate-css": "1.3.3",
     "typescript": "5.7.3"
   }
+}

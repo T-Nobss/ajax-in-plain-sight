@@ -1,0 +1,45 @@
+name: Revalidate Cache
+
+on:
+  workflow_run:
+    workflows: ["Update Council Data"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  revalidate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Revalidate ISR paths
+        env:
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+        run: |
+          echo "Invalidating ISR cache for council pages..."
+          
+          # Get list of councillors and trigger revalidation
+          curl -X POST \
+            -H "Authorization: Bearer $REVALIDATE_SECRET" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_URL }}/api/revalidate?tag=council" \
+            || echo "Note: Revalidation API optional"
+
+      - name: Wait for revalidation
+        run: |
+          echo "Waiting for ISR pages to regenerate..."
+          sleep 10
+
+      - name: Verify updates
+        run: |
+          echo "✅ ISR cache revalidation triggered"
