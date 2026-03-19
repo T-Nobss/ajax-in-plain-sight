@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ajax-scraper"
+version = "0.1.0"
+description = "Scraper for Ajax town council voting records and campaign finance data"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "anthropic>=0.28.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+]

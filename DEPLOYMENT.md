@@ -25,16 +25,62 @@ Set these in your Vercel project settings under "Environment Variables":
 - `ANTHROPIC_API_KEY` - Claude API key from https://console.anthropic.com
 - `ISR_REVALIDATION_TOKEN` - Secret token for webhook (generate with: `openssl rand -hex 32`)
 
-### GitHub Actions Secrets
-Add these to your GitHub repository settings under "Secrets and variables" → "Actions":
+## Step 3: Configure Scheduled Data Scraping
 
-```
-POSTGRES_URL_NON_POOLING: [Your Supabase connection string]
-ANTHROPIC_API_KEY: [Your Anthropic API key]
-ISR_REVALIDATION_TOKEN: [Same token used in Vercel env vars]
+Vercel doesn't support GitHub Actions workflows in the same repository. Instead, choose one of these scheduling options:
+
+### Option A: Vercel Cron Jobs (Recommended)
+Use Vercel's built-in cron functionality via API routes:
+
+```typescript
+// app/api/cron/scrape-minutes/route.ts
+export const runtime = 'nodejs'
+
+export async function GET(req: Request) {
+  // Verify cron secret
+  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Run the scraper
+  const { execSync } = require('child_process')
+  execSync('uv run scripts/scrape_minutes.py')
+
+  return Response.json({ success: true })
+}
 ```
 
-## Step 2: Seed Initial Data
+Then in `vercel.json`:
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/scrape-minutes",
+      "schedule": "0 9 ? * MON"
+    }
+  ]
+}
+```
+
+### Option B: External Scheduler (EasyCron / Upstash)
+Use a free third-party scheduler to trigger your API endpoint:
+
+1. Sign up at https://www.easycron.com (free tier available)
+2. Create a cron job that POSTs to: `https://your-domain.vercel.app/api/scrape`
+3. Set schedule: `0 9 ? * MON` (Monday 9am UTC)
+4. The API route runs the Python scraper via `execSync`
+
+### Option C: Run Scrapers Locally / Self-Hosted
+For development/testing:
+```bash
+cd scripts
+uv run scrape_minutes.py    # Run manually
+uv run parse_form_4.py       # Run manually
+```
+
+Then trigger ISR revalidation via webhook call.
+
+## Step 4: Seed Initial Data
 
 Before the scrapers run, populate the councillor records:
 
@@ -45,34 +91,7 @@ uv run seed_councillors.py
 
 This creates the 7 elected councillors in the database so they're available when votes are imported.
 
-## Step 3: GitHub Actions Workflows
-
-Two workflows are configured to run automatically:
-
-### scrape-minutes.yml (Automated)
-- **Trigger**: Every Monday at 9:00 AM UTC
-- **Action**: Monitors events.ajax.ca for new meeting PDFs
-- **Process**:
-  1. Downloads new minutes PDFs
-  2. Sends to Claude for vote extraction
-  3. Saves motions and votes to database
-  4. Triggers ISR revalidation to refresh council pages
-
-### parse-form-4.yml (Manual)
-- **Trigger**: Run manually via GitHub Actions tab
-- **Action**: Processes campaign finance Form 4 documents
-- **Process**:
-  1. Reads Form 4 PDFs from `/scripts/form_4_documents/`
-  2. Sends to Claude for donation extraction
-  3. Saves donations to database
-  4. Triggers ISR revalidation to refresh donor pages
-
-**To run manually**:
-1. Go to your GitHub repo → "Actions" tab
-2. Select "Parse Form 4 Documents (Manual)"
-3. Click "Run workflow"
-
-## Step 4: Form 4 Documents (Optional)
+## Step 5: Manual Data Import
 
 To import campaign finance data:
 
@@ -101,7 +120,7 @@ curl -X POST \
   "https://your-domain.vercel.app/api/webhook/revalidate?token=YOUR_TOKEN_HERE"
 ```
 
-## Step 6: Monitoring
+## Step 7: Monitoring
 
 ### Scrape Logs
 Check the `scrape_log` table in Supabase to verify:

@@ -1,27 +1,30 @@
-import { PrismaClient } from '@prisma/client'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Metadata } from 'next'
 import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { ChevronLeft, Mail } from 'lucide-react'
+import { prisma } from '@/lib/prisma'
+import { notFound } from 'next/navigation'
 
-const prisma = new PrismaClient()
+export const revalidate = 3600
 
-export const revalidate = 3600 // ISR: revalidate hourly
-
-export const generateStaticParams = async () => {
+export async function generateStaticParams() {
   try {
-    const councillors = await prisma.role.findMany({
+    const persons = await prisma.person.findMany({
       where: {
-        endDate: null,
+        roles: {
+          some: {
+            end_date: null,
+          },
+        },
       },
-      include: {
-        person: true,
+      select: {
+        slug: true,
       },
     })
 
-    return councillors.map((role) => ({
-      slug: role.person.slug,
+    return persons.map((person) => ({
+      slug: person.slug,
     }))
   } catch (error) {
     console.error('[v0] Error generating static params:', error)
@@ -35,6 +38,9 @@ async function getCouncillorData(slug: string) {
       where: { slug },
       include: {
         roles: {
+          where: {
+            end_date: null,
+          },
           include: {
             election: true,
           },
@@ -50,13 +56,17 @@ async function getCouncillorData(slug: string) {
           orderBy: {
             motion: {
               meeting: {
-                meetingDate: 'desc',
+                meeting_date: 'desc',
               },
             },
           },
           take: 50,
         },
-        donations: true,
+        donations: {
+          orderBy: {
+            amount_cents: 'desc',
+          },
+        },
       },
     })
 
@@ -67,240 +77,172 @@ async function getCouncillorData(slug: string) {
   }
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
-  const slug = (params as any).slug
-  const person = await getCouncillorData(slug)
+export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const person = await getCouncillorData(params.slug)
 
   return {
-    title: `${person?.fullName || 'Councillor'} - Ajax in Plain Sight`,
-    description: `Voting record and profile for ${person?.fullName}, Ajax Town Councillor.`,
+    title: `${person?.full_name || 'Councillor'} - Ajax in Plain Sight`,
+    description: `Voting record and profile for ${person?.full_name}, Ajax Town Councillor.`,
   }
 }
 
-export default async function CouncillorPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>
-}) {
-  const slug = (params as any).slug
-  const person = await getCouncillorData(slug)
+export default async function CouncillorPage({ params }: { params: { slug: string } }) {
+  const person = await getCouncillorData(params.slug)
 
   if (!person) {
-    return (
-      <div className="min-h-screen bg-background">
-        <nav className="border-b border-border">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <Link href="/council" className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors w-fit">
-              <ChevronLeft className="w-4 h-4" />
-              Back to Council
-            </Link>
-          </div>
-        </nav>
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <h1 className="text-2xl font-bold">Councillor not found</h1>
-        </main>
-      </div>
-    )
+    notFound()
   }
 
-  const currentRole = person.roles.find((r) => !r.endDate)
+  const currentRole = person.roles[0]
   const voteStats = {
     for: person.votes.filter((v) => v.position === 'for').length,
     against: person.votes.filter((v) => v.position === 'against').length,
-    abstain: person.votes.filter((v) => v.position === 'abstain').length,
+    absent: person.votes.filter((v) => v.position === 'absent').length,
   }
 
-  const totalDonations = person.donations.reduce((sum, d) => sum + d.amountCents, 0)
+  const totalDonations = person.donations.reduce((sum, d) => sum + d.amount_cents, 0)
 
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b border-border">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <Link href="/council" className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors w-fit">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <Link href="/council" className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors">
             <ChevronLeft className="w-4 h-4" />
             Back to Council
           </Link>
+          <div className="flex gap-2">
+            <Link href={`/council/${person.slug}/votes`}>
+              <Button variant="ghost" size="sm">
+                Voting Record
+              </Button>
+            </Link>
+            <Link href={`/council/${person.slug}/donors`}>
+              <Button variant="ghost" size="sm">
+                Campaign Finance
+              </Button>
+            </Link>
+          </div>
         </div>
       </nav>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         {/* Profile Header */}
         <div className="grid md:grid-cols-3 gap-8 mb-12">
-          <div className="md:col-span-2">
-            <h1 className="text-4xl font-bold mb-2">{person.fullName}</h1>
-            {currentRole && (
-              <>
-                <p className="text-xl text-muted-foreground mb-2">{currentRole.title}</p>
-                {currentRole.election && (
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Elected in {currentRole.election.year}
-                  </p>
-                )}
-              </>
+          {/* Photo */}
+          <div>
+            {person.photo_url ? (
+              <img src={person.photo_url} alt={person.full_name} className="w-full rounded-lg mb-4 shadow-md" />
+            ) : (
+              <div className="w-full aspect-square bg-muted rounded-lg mb-4 flex items-center justify-center">
+                <span className="text-muted-foreground">No photo available</span>
+              </div>
             )}
-            {person.bio && <p className="text-lg text-foreground mb-6">{person.bio}</p>}
-            <div className="flex flex-wrap gap-4">
-              {person.email && (
-                <a href={`mailto:${person.email}`} className="text-primary hover:text-primary/80">
-                  Email: {person.email}
-                </a>
-              )}
-              {person.ward && (
-                <div className="text-muted-foreground">
-                  Ward: {person.ward}
-                </div>
-              )}
-            </div>
+            {person.email && (
+              <a href={`mailto:${person.email}`} className="block">
+                <Button className="w-full gap-2">
+                  <Mail className="w-4 h-4" />
+                  Contact
+                </Button>
+              </a>
+            )}
           </div>
 
-          {person.votes.length > 0 && (
-            <div>
+          {/* Info */}
+          <div className="md:col-span-2">
+            <h1 className="text-4xl font-bold mb-2 text-pretty">{person.full_name}</h1>
+            {currentRole && (
+              <div className="mb-6">
+                <p className="text-lg text-primary font-medium">{currentRole.title}</p>
+                {person.ward && <p className="text-muted-foreground">{person.ward}</p>}
+                {currentRole.election && (
+                  <p className="text-sm text-muted-foreground mt-2">Elected in {currentRole.election.year}</p>
+                )}
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4">
               <Card>
-                <CardHeader>
-                  <CardTitle>Voting Summary</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Votes For</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Votes For</p>
-                    <p className="text-2xl font-bold text-primary">{voteStats.for}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Votes Against</p>
-                    <p className="text-2xl font-bold text-destructive">{voteStats.against}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Abstentions</p>
-                    <p className="text-2xl font-bold text-muted-foreground">{voteStats.abstain}</p>
-                  </div>
-                  <div className="pt-2 border-t border-border">
-                    <p className="text-sm text-muted-foreground">Total Votes Cast</p>
-                    <p className="text-lg font-semibold">{person.votes.length}</p>
-                  </div>
+                <CardContent>
+                  <p className="text-2xl font-bold text-primary">{voteStats.for}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Votes Against</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-destructive">{voteStats.against}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Total Votes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{person.votes.length}</p>
                 </CardContent>
               </Card>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Tabs for Votes and Donors */}
-        <Tabs defaultValue="votes" className="mb-12">
-          <TabsList>
-            <TabsTrigger value="votes">Voting Record</TabsTrigger>
-            <TabsTrigger value="donors">Campaign Finance</TabsTrigger>
-          </TabsList>
+        {/* Quick Links */}
+        <div className="grid md:grid-cols-2 gap-6 mb-12">
+          <Card className="bg-secondary/30">
+            <CardHeader>
+              <CardTitle>Voting Record</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                View all {person.votes.length} recorded votes on council motions, organized by date and committee.
+              </p>
+              <Link href={`/council/${person.slug}/votes`}>
+                <Button className="w-full">View Voting History →</Button>
+              </Link>
+            </CardContent>
+          </Card>
 
-          <TabsContent value="votes" className="space-y-6">
-            {person.votes.length === 0 ? (
-              <Card>
-                <CardContent className="pt-12 pb-12 text-center">
-                  <p className="text-muted-foreground">
-                    No voting records available yet. Meeting minutes will be processed in Phase 4.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <>
-                <div className="space-y-3">
-                  {person.votes.map((vote) => (
-                    <Card key={vote.id}>
-                      <CardContent className="pt-6">
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1">
-                              <p className="font-semibold text-foreground">{vote.motion.title}</p>
-                              {vote.motion.meeting && (
-                                <p className="text-sm text-muted-foreground">
-                                  {new Date(vote.motion.meeting.meetingDate).toLocaleDateString()}
-                                </p>
-                              )}
-                            </div>
-                            <span
-                              className={`px-3 py-1 rounded-full text-sm font-medium whitespace-nowrap ${
-                                vote.position === 'for'
-                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                  : vote.position === 'against'
-                                    ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                                    : 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
-                              }`}
-                            >
-                              {vote.position.charAt(0).toUpperCase() + vote.position.slice(1)}
-                            </span>
-                          </div>
-                          {vote.motion.outcome && (
-                            <p className="text-xs text-muted-foreground">
-                              Motion {vote.motion.outcome}
-                            </p>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </>
-            )}
-          </TabsContent>
-
-          <TabsContent value="donors" className="space-y-6">
-            {person.donations.length === 0 ? (
-              <Card>
-                <CardContent className="pt-12 pb-12 text-center">
-                  <p className="text-muted-foreground">
-                    Campaign finance data will be available once Form 4 documents are processed in Phase 4.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <>
-                <Card className="bg-secondary/30">
-                  <CardHeader>
-                    <CardTitle>Total Campaign Donations</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-3xl font-bold text-primary">
-                      ${(totalDonations / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      From {person.donations.length} donor{person.donations.length !== 1 ? 's' : ''}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <div className="space-y-3">
-                  {person.donations.map((donation) => (
-                    <Card key={donation.id}>
-                      <CardContent className="pt-6">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <p className="font-semibold text-foreground">{donation.donorName}</p>
-                            {donation.donorAddress && (
-                              <p className="text-sm text-muted-foreground">{donation.donorAddress}</p>
-                            )}
-                            {donation.source && (
-                              <p className="text-xs text-muted-foreground mt-1">Source: {donation.source}</p>
-                            )}
-                          </div>
-                          <div className="text-right whitespace-nowrap">
-                            <p className="font-semibold text-foreground">
-                              ${(donation.amountCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        {/* Back Link */}
-        <div className="flex justify-center pt-6 border-t border-border">
-          <Link href="/council">
-            <Button variant="ghost">← Back to Council</Button>
-          </Link>
+          <Card className="bg-secondary/30">
+            <CardHeader>
+              <CardTitle>Campaign Finance</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                See all {person.donations.length} documented campaign contributions and donors from the 2022 election.
+              </p>
+              <Link href={`/council/${person.slug}/donors`}>
+                <Button className="w-full">View Donor List →</Button>
+              </Link>
+            </CardContent>
+          </Card>
         </div>
+
+        {/* About Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle>About This Profile</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground space-y-3">
+            <p>
+              This profile aggregates publicly available information about {person.full_name}, including voting records from official Ajax town council meeting minutes and campaign finance data from Form 4 filings.
+            </p>
+            <p>
+              Voting records are updated automatically each week when new council minutes are published. Campaign finance data comes from the 2022 municipal election.
+            </p>
+          </CardContent>
+        </Card>
       </main>
+
+      <footer className="border-t border-border bg-muted/30 mt-16 py-8">
+        <div className="max-w-4xl mx-auto px-4 text-center text-sm text-muted-foreground">
+          <p>Ajax in Plain Sight • Civic Transparency for Ajax, Ontario</p>
+        </div>
+      </footer>
     </div>
   )
 }
+
