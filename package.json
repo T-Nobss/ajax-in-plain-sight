@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "prisma:generate": "prisma generate",
@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
-    "@prisma/client": "^7.5.0",
     "@vercel/analytics": "1.6.1",
     "@radix-ui/react-accordion": "1.2.12",
     "@radix-ui/react-alert-dialog": "1.1.15",
@@ -63,7 +62,6 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@prisma/cli": "^7.5.0",
     "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22",
     "@types/react": "19.2.14",
