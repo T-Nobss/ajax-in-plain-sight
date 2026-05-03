@@ -5,60 +5,88 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Type definitions for our database
-export interface Person {
+// ─── Types matching your 8 Supabase tables exactly ───────────────────────────
+
+export type Person = {
   id: string
   slug: string
   full_name: string
-  ward?: string
-  photo_url?: string
-  email?: string
+  ward: string | null
+  photo_url: string | null
+  email: string | null
   created_at: string
 }
 
-export interface Role {
+export type Election = {
   id: string
-  person_id: string
-  election_id?: string
-  title: string
-  ward?: string
-  won: boolean
-  votes_received?: number
-  vote_pct?: number
-  start_date?: string
-  end_date?: string | null
+  year: number
+  election_date: string | null
+  status: 'closed' | 'upcoming' | 'active'
 }
 
-export interface Vote {
+export type Role = {
+  id: string
+  person_id: string
+  election_id: string | null
+  title: string
+  ward: string | null
+  won: boolean
+  votes_received: number | null
+  vote_pct: number | null
+  start_date: string | null
+  end_date: string | null
+}
+
+export type Meeting = {
+  id: string
+  meeting_date: string
+  committee: string
+  source_url: string | null
+  pdf_url: string | null
+}
+
+export type Motion = {
+  id: string
+  meeting_id: string
+  sequence: number
+  title: string
+  full_text: string | null
+  outcome: string | null
+}
+
+export type Vote = {
   id: string
   motion_id: string
   person_id: string
   position: 'for' | 'against' | 'absent'
 }
 
-export interface Motion {
-  id: string
-  meeting_id: string
-  sequence: number
-  title: string
-  full_text?: string
-  outcome?: string
-}
-
-export interface Meeting {
-  id: string
-  meeting_date: string
-  committee: string
-  source_url?: string
-  pdf_url?: string
-}
-
-export interface Donation {
+export type Donation = {
   id: string
   person_id: string
-  election_id?: string
+  election_id: string
   donor_name: string
-  donor_address?: string
+  donor_address: string | null
   amount_cents: number
-  source?: string
+  contribution_type: 'monetary' | 'goods_services' | null
+  source: string | null
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+export function formatDollars(cents: number): string {
+  return new Intl.NumberFormat('en-CA', {
+    style: 'currency',
+    currency: 'CAD',
+    minimumFractionDigits: 2,
+  }).format(cents / 100)
+}
+
+export function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'America/Toronto',
+  })
 }

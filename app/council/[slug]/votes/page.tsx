@@ -1,136 +1,144 @@
-import { Metadata } from 'next'
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { ChevronLeft } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { notFound } from 'next/navigation'
+import { formatDate } from '@/lib/supabase'
 
-export const revalidate = 3600
+export default function VotesPage({ params }: { params: Promise<{ slug: string }> }) {
+  const [votes, setVotes] = useState<any[]>([])
+  const [name, setName] = useState('')
+  const [filter, setFilter] = useState<'all' | 'for' | 'against' | 'absent'>('all')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-async function getCouncillorVotes(slug: string) {
-  try {
-    const { data: person } = await supabase
-      .from('persons')
-      .select(`
-        id,
-        full_name,
-        votes!person_id(
-          id,
-          position,
-          motions:motion_id(
-            id,
-            title,
-            full_text,
-            outcome,
-            meetings:meeting_id(meeting_date, committee)
-          )
-        )
-      `)
-      .eq('slug', slug)
-      .single()
+  useEffect(() => {
+    ;(async () => {
+      const { slug } = await params
+      const r1 = await fetch('/api/council')
+      if (!r1.ok) { setError('Could not load council data'); setLoading(false); return }
+      const councillors = await r1.json()
+      const person = councillors.find((c: any) => c.slug === slug)
+      if (!person) { setError(`No councillor found for slug "${slug}"`); setLoading(false); return }
+      setName(person.full_name)
 
-    if (!person) return null
-    return person
-  } catch {
-    return null
-  }
-}
+      const r2 = await fetch(`/api/votes/${person.id}`)
+      if (!r2.ok) { setError('Could not load votes'); setLoading(false); return }
+      setVotes(await r2.json())
+      setLoading(false)
+    })()
+  }, [params])
 
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const person = await getCouncillorVotes(params.slug)
-  return {
-    title: `${person?.full_name || 'Councillor'} Voting Record - Ajax in Plain Sight`,
-    description: `Complete voting record for ${person?.full_name} on Ajax town council motions.`,
-  }
-}
+  const filtered = filter === 'all' ? votes : votes.filter(v => v.position === filter)
+  const total = votes.length
+  const pctFor = total > 0 ? Math.round((votes.filter(v => v.position === 'for').length / total) * 100) : 0
+  const against = votes.filter(v => v.position === 'against').length
 
-export default async function VotesPage({ params }: { params: { slug: string } }) {
-  const person = await getCouncillorVotes(params.slug)
+  const posClass = (p: string) =>
+    p === 'for' ? 'bg-emerald-50 text-emerald-700' :
+    p === 'against' ? 'bg-red-50 text-red-700' :
+    'bg-gray-100 text-gray-400'
 
-  if (!person) notFound()
+  if (loading) return (
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <div className="space-y-3 animate-pulse">
+        <div className="h-8 bg-gray-100 rounded w-56" />
+        <div className="h-4 bg-gray-100 rounded w-32" />
+      </div>
+    </main>
+  )
 
-  const votes = (person.votes || []).sort((a: any, b: any) => {
-    return new Date(b.motions.meetings.meeting_date).getTime() - 
-           new Date(a.motions.meetings.meeting_date).getTime()
-  })
+  if (error) return (
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <Link href="/council" className="text-xs text-gray-400 hover:text-teal-600">← Council</Link>
+      <p className="mt-6 text-red-500 text-sm">{error}</p>
+    </main>
+  )
 
   return (
-    <div className="min-h-screen bg-background">
-      <nav className="border-b border-border">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <Link href={`/council/${params.slug}`} className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors">
-            <ChevronLeft className="w-4 h-4" />
-            Back to Profile
-          </Link>
-        </div>
-      </nav>
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <div className="mb-2">
+        <Link href="/council" className="text-xs text-gray-400 hover:text-teal-600">← All councillors</Link>
+      </div>
+      <h1 className="text-3xl font-bold text-gray-900 mb-1">{name}</h1>
+      <p className="text-gray-400 text-sm mb-8">Voting record</p>
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold mb-2">{person.full_name}</h1>
-          <p className="text-lg text-muted-foreground">Voting Record ({votes.length} votes)</p>
-        </div>
-
-        {votes.length === 0 ? (
-          <Card>
-            <CardContent className="pt-12 pb-12 text-center">
-              <p className="text-muted-foreground">
-                No voting records available yet. Once meeting minutes are processed, votes will appear here.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-4">
-            {votes.map((vote: any, idx: number) => {
-              const motion = vote.motions
-              const meeting = motion.meetings
-              const positionColor = vote.position === 'for' 
-                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                : vote.position === 'against'
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                : 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
-
-              return (
-                <Card key={vote.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <p className="font-semibold text-foreground">{motion.title}</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.committee}
-                        </p>
-                        {motion.full_text && (
-                          <p className="text-sm text-foreground mt-3 leading-relaxed">{motion.full_text}</p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium whitespace-nowrap ${positionColor}`}>
-                          {vote.position === 'for' ? 'For' : vote.position === 'against' ? 'Against' : 'Absent'}
-                        </span>
-                        {motion.outcome && (
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Motion {motion.outcome}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        {[['Total votes', total], ['Voted for', `${pctFor}%`], ['Against', against]].map(([label, val]) => (
+          <div key={label as string} className="bg-gray-50 rounded-xl p-4">
+            <div className="text-2xl font-bold text-gray-900">{val}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-wide mt-1">{label}</div>
           </div>
-        )}
+        ))}
+      </div>
 
-        <div className="mt-12">
-          <Link href={`/council/${params.slug}`}>
-            <Button variant="outline" className="gap-2">
-              <ChevronLeft className="w-4 h-4" />
-              Back to Profile
-            </Button>
-          </Link>
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {(['all', 'for', 'against', 'absent'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+              filter === f ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-gray-500 border-gray-200 hover:border-teal-300'
+            }`}>
+            {f === 'all' ? `All (${total})` : f}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="border border-gray-200 rounded-xl p-12 text-center">
+          <p className="text-gray-400 text-sm">
+            {total === 0
+              ? 'No vote records yet. The minutes scraper needs to run first.'
+              : `No votes matching "${filter}".`}
+          </p>
         </div>
-      </main>
-    </div>
+      ) : (
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {['Date', 'Motion', 'Vote', 'Result'].map(h => (
+                  <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((v, i) => (
+                <tr key={v.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                  <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap align-top">
+                    {v.motion?.meeting?.meeting_date ? formatDate(v.motion.meeting.meeting_date) : '—'}
+                    <div className="text-gray-300 mt-0.5">{v.motion?.meeting?.committee}</div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700 align-top">
+                    {v.motion?.meeting?.source_url ? (
+                      <a href={v.motion.meeting.source_url} target="_blank" rel="noopener noreferrer"
+                        className="hover:text-teal-600 transition-colors">
+                        {v.motion?.title ?? '—'}
+                      </a>
+                    ) : v.motion?.title ?? '—'}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${posClass(v.position)}`}>
+                      {v.position}
+                    </span>
+                  </td>
+                  <td className={`px-4 py-3 text-xs font-medium align-top ${
+                    v.motion?.outcome === 'CARRIED' ? 'text-emerald-600' :
+                    v.motion?.outcome === 'LOST' ? 'text-red-500' : 'text-gray-400'
+                  }`}>
+                    {v.motion?.outcome ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-300 mt-4">
+        Source: Ajax Town Council meeting minutes ·{' '}
+        <a href="https://events.ajax.ca/Meetings" target="_blank" rel="noopener noreferrer" className="hover:text-teal-500">
+          events.ajax.ca
+        </a>
+      </p>
+    </main>
   )
 }
