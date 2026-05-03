@@ -1,131 +1,126 @@
-import { Metadata } from 'next'
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { ChevronLeft } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { notFound } from 'next/navigation'
+import { formatDollars } from '@/lib/supabase'
+import type { Donation } from '@/lib/supabase'
 
-export const revalidate = 3600
+export default function DonorsPage({ params }: { params: Promise<{ slug: string }> }) {
+  const [donations, setDonations] = useState<Donation[]>([])
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-async function getCouncillorDonors(slug: string) {
-  try {
-    const { data: person } = await supabase
-      .from('persons')
-      .select(`
-        id,
-        full_name,
-        donations!person_id(
-          id,
-          donor_name,
-          donor_address,
-          amount_cents,
-          source
-        )
-      `)
-      .eq('slug', slug)
-      .single()
+  useEffect(() => {
+    ;(async () => {
+      const { slug } = await params
+      const r1 = await fetch('/api/council')
+      if (!r1.ok) { setError('Could not load council data'); setLoading(false); return }
+      const councillors = await r1.json()
+      const person = councillors.find((c: any) => c.slug === slug)
+      if (!person) { setError(`No councillor found for slug "${slug}"`); setLoading(false); return }
+      setName(person.full_name)
 
-    if (!person) return null
-    return person
-  } catch {
-    return null
-  }
-}
+      const r2 = await fetch(`/api/donors/${person.id}`)
+      if (!r2.ok) { setError('Could not load donations'); setLoading(false); return }
+      setDonations(await r2.json())
+      setLoading(false)
+    })()
+  }, [params])
 
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const person = await getCouncillorDonors(params.slug)
-  return {
-    title: `${person?.full_name || 'Councillor'} Campaign Finance - Ajax in Plain Sight`,
-    description: `Campaign donations and financing for ${person?.full_name} from the 2022 election.`,
-  }
-}
+  const total = donations.reduce((s, d) => s + d.amount_cents, 0)
+  const largest = donations[0]?.amount_cents ?? 0
 
-export default async function DonorsPage({ params }: { params: { slug: string } }) {
-  const person = await getCouncillorDonors(params.slug)
+  // Build Form 4 URL from name — matches the ajax.ca URL pattern
+  const form4Url = name
+    ? `https://www.ajax.ca/en/inside-townhall/resources/Documents/${
+        name.toUpperCase().replace(/\s+/g, '-')
+      }---Financial-Statements.pdf`
+    : null
 
-  if (!person) notFound()
+  if (loading) return (
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <div className="space-y-3 animate-pulse">
+        <div className="h-8 bg-gray-100 rounded w-56" />
+        <div className="h-4 bg-gray-100 rounded w-32" />
+      </div>
+    </main>
+  )
 
-  const donations = (person.donations || []).sort((a: any, b: any) => b.amount_cents - a.amount_cents)
-  const totalDonations = donations.reduce((sum: number, d: any) => sum + d.amount_cents, 0)
+  if (error) return (
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <Link href="/council" className="text-xs text-gray-400 hover:text-teal-600">← Council</Link>
+      <p className="mt-6 text-red-500 text-sm">{error}</p>
+    </main>
+  )
 
   return (
-    <div className="min-h-screen bg-background">
-      <nav className="border-b border-border">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <Link href={`/council/${params.slug}`} className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors">
-            <ChevronLeft className="w-4 h-4" />
-            Back to Profile
-          </Link>
-        </div>
-      </nav>
+    <main className="max-w-4xl mx-auto px-6 py-12">
+      <div className="mb-2">
+        <Link href="/council" className="text-xs text-gray-400 hover:text-teal-600">← All councillors</Link>
+      </div>
+      <h1 className="text-3xl font-bold text-gray-900 mb-1">{name}</h1>
+      <p className="text-gray-400 text-sm mb-8">Campaign finance — 2022 election</p>
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold mb-2">{person.full_name}</h1>
-          <p className="text-lg text-muted-foreground">Campaign Finance - 2022 Election</p>
-        </div>
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        {[['Total raised', formatDollars(total)], ['Named donors', donations.length], ['Largest donation', formatDollars(largest)]].map(([label, val]) => (
+          <div key={label as string} className="bg-gray-50 rounded-xl p-4">
+            <div className="text-2xl font-bold text-gray-900">{val}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-wide mt-1">{label}</div>
+          </div>
+        ))}
+      </div>
 
-        {donations.length === 0 ? (
-          <Card>
-            <CardContent className="pt-12 pb-12 text-center">
-              <p className="text-muted-foreground">
-                No campaign donation records available yet. Form 4 documents will be processed and appear here.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <Card className="bg-secondary/30 mb-8">
-              <CardHeader>
-                <CardTitle>Total Campaign Donations</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-4xl font-bold text-primary">
-                  ${(totalDonations / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  From {donations.length} donor{donations.length !== 1 ? 's' : ''}
-                </p>
-              </CardContent>
-            </Card>
-
-            <div className="space-y-4">
-              {donations.map((donation: any) => (
-                <Card key={donation.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <p className="font-semibold text-foreground">{donation.donor_name}</p>
-                        {donation.donor_address && (
-                          <p className="text-sm text-muted-foreground mt-1">{donation.donor_address}</p>
-                        )}
-                        {donation.source && (
-                          <p className="text-xs text-muted-foreground mt-2">Source: {donation.source}</p>
-                        )}
-                      </div>
-                      <div className="text-right whitespace-nowrap">
-                        <p className="font-semibold text-foreground">
-                          ${(donation.amount_cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </>
+      <div className="bg-amber-50 border-l-2 border-amber-300 px-4 py-3 rounded-r-lg mb-6 text-xs text-amber-800">
+        Only donations over $100 are individually disclosed under Ontario's <em>Municipal Elections Act</em>.
+        {form4Url && (
+          <> · <a href={form4Url} target="_blank" rel="noopener noreferrer" className="underline font-medium">
+            View original Form 4 →
+          </a></>
         )}
+      </div>
 
-        <div className="mt-12">
-          <Link href={`/council/${params.slug}`}>
-            <Button variant="outline" className="gap-2">
-              <ChevronLeft className="w-4 h-4" />
-              Back to Profile
-            </Button>
-          </Link>
+      {donations.length === 0 ? (
+        <div className="border border-gray-200 rounded-xl p-12 text-center">
+          <p className="text-gray-400 text-sm">No donor records yet.</p>
+          <p className="text-gray-300 text-xs mt-2">Run the Form 4 parser to populate donation data.</p>
         </div>
-      </main>
-    </div>
+      ) : (
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {['Donor', 'Address', 'Amount', 'Type'].map(h => (
+                  <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {donations.map((d, i) => (
+                <tr key={d.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                  <td className="px-4 py-3 font-medium text-gray-800">{d.donor_name}</td>
+                  <td className="px-4 py-3 text-gray-400 text-xs">{d.donor_address ?? '—'}</td>
+                  <td className="px-4 py-3 font-mono text-gray-700 text-right">{formatDollars(d.amount_cents)}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      d.contribution_type === 'goods_services' ? 'bg-purple-50 text-purple-700' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {d.contribution_type === 'goods_services' ? 'goods/services' : 'monetary'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-300 mt-4">
+        Source: Form 4 Financial Statement ·{' '}
+        <a href="https://www.ajax.ca/en/inside-townhall/elections.aspx" target="_blank" rel="noopener noreferrer" className="hover:text-teal-500">
+          ajax.ca/elections
+        </a>
+      </p>
+    </main>
   )
 }
